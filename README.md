@@ -1,218 +1,123 @@
 # INF5173 – Projet P2 : Entrepôt de données Retail (SQL Server 2022)
 
-> **But** : Concevoir un modèle en **étoile** autour des transactions de détail, développer un **ETL** (Python ou outil ETL), exécuter des **opérations ROLAP** (Slice, Dice, Roll-up, Drill-down) et livrer un **rapport** professionnel.
+> **But** : 
+Ce projet consiste à construire un entrepôt de données décisionnel complet à partir d’un jeu d’un million de transactions de détail.  
+Il inclut :  
+- l’analyse du jeu de données,  
+- la conception d’un schéma en étoile,  
+- la construction de la base dans SQL Server,  
+- un pipeline ETL entièrement basé sur SQL Server Management Studio (SSMS),  
+- et une série d’analyses OLAP accompagnées de visualisations.  
 
 ---
 
-## 📦 Contenu du dépôt
+## 📌 1. Objectifs du projet
 
-```
-INF5173-P2-EquipeN/
-├─ README.md                       ← ce fichier
-├─ report/
-│   └─ INF5173-P2-EquipeN-Rapport.docx
-├─ sql/
-│   ├─ 00_create_database.sql      ← (optionnel) création base
-│   ├─ 10_dim_tables.sql           ← DDL dimensions
-│   ├─ 20_fact_table.sql           ← DDL table de faits
-│   ├─ 30_indexes.sql              ← index & contraintes
-│   ├─ 40_seed_promotion.sql       ← seed DimPromotion
-│   └─ 50_rolap_queries.sql        ← requêtes ROLAP
-├─ etl/
-│   ├─ rapidminer_process.rmp      ← (optionnel)
-│   └─ python/
-│       ├─ requirements.txt        ← pandas, pyodbc, python-dateutil
-│       ├─ etl_config.yaml         ← paramètres connexion & chemins
-│       ├─ load_dimensions.py      ← création/mapping des Dim
-│       ├─ load_fact_sales.py      ← chargement FactSales
-│       └─ utils.py
-├─ data/
-│   ├─ raw/
-│   │   └─ retail_transactions.csv ← dataset source (non versionné)
-│   ├─ staging/
-│   └─ cleaned/
-├─ outputs/
-│   ├─ rolap_exports/
-│   └─ figures/
-└─ tests/
-    ├─ test_integrity.sql
-    └─ test_etl_run.py
-```
+Le but de ce travail est de :
 
-> ⚠️ **Ne versionnez pas** les données réelles. Utilisez `.gitignore` pour exclure `data/`.
+1. Explorer le jeu de données et identifier les dimensions pertinentes.  
+2. Concevoir un **schéma en étoile** adapté au domaine du retail.  
+3. Construire un entrepôt de données dans SQL Server.  
+4. Peupler l’entrepôt via un **pipeline ETL 100% SQL/SSMS**.  
+5. Effectuer des opérations OLAP : **Slice, Dice, Roll-up, Drill-down**.  
+6. Exporter les résultats sous forme de graphiques et interpréter les tendances.
 
 ---
 
-## 🧠 Modèle en étoile (schéma logique)
 
-**Table de faits**
-- `FactSales(SalesKey, DateKey, CustomerKey, ProductKey, StoreKey, PaymentKey, PromotionKey, Transaction_ID, Total_Items, Total_Cost, Net_Sales, LoadTS)`
+## 🏗️ 3. Modèle conceptuel – Schéma en étoile
 
-**Dimensions**
-- `DimDate(DateKey, FullDate, YearNum, QuarterNum, MonthNum, MonthName, DayNum, DayOfWeekNum, DayOfWeekName, Season)`  
-- `DimCustomer(CustomerKey, Customer_Name, Customer_Category, City)`  
-- `DimProduct(ProductKey, Product)`  
-- `DimStore(StoreKey, Store_Type, City)`  
-- `DimPayment(PaymentKey, Payment_Method)`  
-- `DimPromotion(PromotionKey, PromotionType, DiscountFlag, Description)`
+L’entrepôt est structuré autour de la table de faits **FactSales**, reliée à six dimensions :
 
-**Justifications clés**
-- Grain = **transaction** (une ligne par vente).  
-- `Promotion` faible cardinalité (3 modalités avec “No Promotion”) + `Discount_Applied` → **DimPromotion** compacte.  
-- Index sur clés étrangères pour accélérer les requêtes OLAP.
+- **DimDate** : structure temporelle (Year, Month, Day).  
+- **DimCustomer** : informations sur les clients.  
+- **DimProduct** : produits achetés.  
+- **DimStore** : villes et types de magasins.  
+- **DimPayment** : méthodes de paiement.  
+- **DimPromotion** : type de promotion et discount appliqué.
+
+👉 Le choix du schéma en étoile permet une navigation rapide dans les données (Slice, Dice, Roll-up, Drill-down).
 
 ---
 
-## 🛠️ Prérequis
+## ⚙️ 4. Pipeline ETL (100 % SQL/SSMS)
 
-- **SQL Server 2022** + **SSMS** (ou Azure Data Studio)
-- **Python 3.10+** avec : `pandas`, `pyodbc`, `python-dateutil`, `pyyaml`
-- **Pilote ODBC** SQL Server (Windows : *ODBC Driver 17/18 for SQL Server*)
+Contrairement à d'autres projets, **aucun code Python n'a été utilisé**.
 
-### Installation Python (venv)
-```bash
-python -m venv .venv
-.\.venv\Scripts\activate       # Windows
-pip install -r etl/python/requirements.txt
-```
+### Étapes ETL :
 
----
+1. **Chargement du CSV brut** dans la table `Retail_Transactions_Raw` via `BULK INSERT`.  
+2. **Nettoyage et typage** dans `Retail_Transactions_Staging`.  
+3. **Chargement des dimensions** avec génération de clés substituts.  
+4. **Construction de la table de faits** avec jointure sur les dimensions.  
 
-## 🗄️ Déploiement du schéma
-
-Dans **SSMS** :
-
-1. Créer la base (facultatif si déjà créée) :
-   ```sql
-   CREATE DATABASE RetailDW;
-   GO
-   USE RetailDW;
-   GO
-   ```
-
-2. Exécuter, dans l’ordre :
-   - `sql/10_dim_tables.sql`
-   - `sql/20_fact_table.sql`
-   - `sql/30_indexes.sql`
-   - `sql/40_seed_promotion.sql` (insère *No Promotion*, *BOGO*, *Discount on Selected Items*)
-
-> Vérification :  
-> ```sql
-> USE RetailDW; SELECT name FROM sys.tables ORDER BY name;
-> ```
+📌 *Note importante* :  
+L’attribut `Season` du dataset s’est révélé **incohérent** (toutes les saisons apparaissant à tous les mois).  
+Nous avons **conservé la valeur brute dans FactSales**, mais **exclu cette variable des analyses temporelles**.
 
 ---
 
-## 🔄 Chargement (ETL)
+## 📊 5. Analyses OLAP réalisées
 
-**Entrée attendue :** `data/raw/retail_transactions.csv` avec les colonnes :  
-`['Transaction_ID','Date','Customer_Name','Product','Total_Items','Total_Cost','Payment_Method','City','Store_Type','Discount_Applied','Customer_Category','Season','Promotion']`
+Les requêtes suivantes ont été exécutées et exportées en CSV pour création des graphiques :
 
-1) **Créer les dimensions** (déduplication et mapping) :
-```bash
-python etl/python/load_dimensions.py
-```
+1. **Roll-up temporel** – Ventes par année et par mois  
+2. **Drill-down simplifié** – Ventes par heure d’une journée représentative par année  
+3. **Slice** – Analyse d’une catégorie de client  
+4. **Dice** – Analyse multidimensionnelle (client × magasin × attributs)  
+5. **Slice/Dice** – Impact des promotions par catégorie de client  
+6. **Comparaison des magasins** (Store_Type × City)  
+7. **Répartition des modes de paiement**
 
-2) **Charger la table de faits** :
-```bash
-python etl/python/load_fact_sales.py
-```
-
-> Le mapping `Promotion + Discount_Applied` → `DimPromotion` se fait dans l’ETL.  
-> `Promotion=None` est mappé à `PromotionType='No Promotion'` et `DiscountFlag=0`.
-
----
-
-## 📊 Requêtes ROLAP (extraits)
-
-**Slice – par type de promotion**
-```sql
-SELECT p.PromotionType, COUNT(*) AS NbTxn, SUM(f.Total_Cost) AS TotalSales
-FROM dbo.FactSales f
-JOIN dbo.DimPromotion p ON f.PromotionKey = p.PromotionKey
-GROUP BY p.PromotionType
-ORDER BY TotalSales DESC;
-```
-
-**Dice – par saison et mode de paiement**
-```sql
-SELECT d.Season, pay.Payment_Method, SUM(f.Total_Cost) AS TotalSales
-FROM dbo.FactSales f
-JOIN dbo.DimDate d ON f.DateKey = d.DateKey
-JOIN dbo.DimPayment pay ON f.PaymentKey = pay.PaymentKey
-GROUP BY d.Season, pay.Payment_Method;
-```
-
-**Roll-up – Année → Trimestre → Mois**
-```sql
-SELECT d.YearNum, d.QuarterNum, d.MonthName, SUM(f.Total_Cost) AS Sales
-FROM dbo.FactSales f
-JOIN dbo.DimDate d ON f.DateKey = d.DateKey
-GROUP BY ROLLUP (d.YearNum, d.QuarterNum, d.MonthName);
-```
-
-**Drill-down – Store_Type → City**
-```sql
-SELECT s.Store_Type, s.City, SUM(f.Total_Cost) AS Sales
-FROM dbo.FactSales f
-JOIN dbo.DimStore s ON f.StoreKey = s.StoreKey
-GROUP BY s.Store_Type, s.City
-ORDER BY s.Store_Type, Sales DESC;
-```
+Chaque analyse est accompagnée dans le rapport :
+- d’un graphique Excel,  
+- d’une interprétation académique,  
+- et d’une explication de la tendance observée.
 
 ---
 
-## ✅ Contrôles qualité (à inclure au rapport)
+## 📈 6. Visualisations
 
-- Integrité référentielle : 0 FK orphelines (`FactSales` → Dim\*).  
-- Comptage : #lignes Fact = #transactions source.  
-- Totaux : `SUM(Total_Cost)` (Fact) ≈ total source.  
-- Distribs : répartition par `Season`, `Store_Type`, `Payment_Method`.
+Les fichiers CSV issus des requêtes ont été transformés en :
 
----
+- diagrammes en colonnes groupées,  
+- graphiques en lignes,  
+- diagrammes en secteurs,  
+- tableaux croisés dynamiques,  
 
-## 🤝 Collaboration & branches Git
+selon le type d’analyse.
 
-### Initialisation locale
-```bash
-git init
-git add .
-git commit -m "feat: initial commit – star schema, ETL scaffolding, ROLAP queries"
-```
-
-### Création du dépôt GitHub (via GitHub CLI)
-```bash
-gh repo create INF5173-P2-EquipeN --public --source=. --remote=origin --push
-```
-
-> Sans CLI : crée le repo vide sur GitHub, puis :
-```bash
-git remote add origin https://github.com/<votre-org>/INF5173-P2-EquipeN.git
-git branch -M main
-git push -u origin main
-```
-
-### Branche pour le coéquipier
-```bash
-git checkout -b feature/etl-coequipier
-git push -u origin feature/etl-coequipier
-```
-Inviter ton coéquipier : *GitHub → Settings → Collaborators → Add people*.
-
-**Workflow recommandé**
-- Dev sur branches `feature/*`
-- Pull Request → Review → Merge vers `main`
-- Optionnel : protéger `main` (branch protection rules, 1 review min).
+Les visualisations permettent de mettre en évidence :
+- des cycles temporels,  
+- des comportements client,  
+- l’impact des promotions,  
+- la performance des magasins,  
+- les préférences de paiement.
 
 ---
 
-## 📝 Licence & auteurs
-- Licence : académique (à préciser selon consignes du cours).
-- Équipe : `EquipeN` – Franklin & Coéquipier (ajouter noms/comptes GitHub).
+## 📝 7. Limitations observées
+
+- L’attribut *Season* du dataset est **incohérent** → exclu des analyses.  
+- Certaines promotions étaient absentes ou nulles → normalisations nécessaires.  
+- Le dataset ne comprend pas de vraies clés clients/produits → difficulté d’analyse longitudinale.  
+- ETL manuel sous SSMS → performant mais sans automatisation.  
 
 ---
 
-## 📚 Références rapides
-- SQL Server 2022 + SSMS
-- Pandas, pyodbc, dateutil
-- Bonnes pratiques Kimball (modèle en étoile, dims conformes, SCD – type 1 ici)
+## 🎯 8. Conclusion générale
+
+Ce projet démontre la construction complète d’un entrepôt de données, depuis la modélisation jusqu’à l’analyse OLAP d’un jeu de transactions massif.  
+Le schéma en étoile conçu facilite les analyses multidimensionnelles, tandis que l’ETL basé sur SSMS assure un pipeline fiable et contrôlé pour l’intégration des données.  
+Les opérations OLAP ont permis de révéler des tendances importantes liées aux ventes, aux magasins, au comportement client et aux méthodes de paiement, confirmant la valeur du modèle décisionnel mis en place.
+
+---
+
+# 📬 Auteur
+
+**Franklin Agouanet**  
+Programme : Maitrise en informatique — Science des données et IA  
+Université du Québec en Outaouais (UQO)
+
+
+
