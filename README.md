@@ -42,7 +42,7 @@ L’entrepôt est structuré autour de la table de faits **FactSales**, reliée 
 
 ## ⚙️ 4. Pipeline ETL (100 % SQL/SSMS)
 
-Contrairement à d'autres projets, **aucun code Python n'a été utilisé**.
+Nous n'avons utilisé Vscode que pour l'analyse des données.
 
 ### Étapes ETL :
 
